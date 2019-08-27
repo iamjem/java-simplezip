@@ -1,11 +1,8 @@
 package com.pixeldonor;
 
 
-import org.apache.commons.io.IOUtils;
 
-import java.io.FileInputStream;
 import java.io.IOException;
-import java.io.OutputStream;
 import java.net.URI;
 import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
@@ -19,6 +16,7 @@ public class ThreadedArchiver extends Archiver {
     private FileSystem zipfs;
     private ExecutorService es = Executors.newFixedThreadPool(4);
     private Visitor visitor = new Visitor();
+    private Path root = null;
 
     class Callable implements java.util.concurrent.Callable<Integer> {
         private Path file;
@@ -30,14 +28,11 @@ public class ThreadedArchiver extends Archiver {
 
         @Override
         public Integer call() throws Exception {
-            // copy input file to ZipFileSystem
-            FileInputStream in = new FileInputStream(file.toFile());
-            OutputStream out = Files.newOutputStream(zipfs.getPath(file.getFileName().toString()));
-
-            IOUtils.copy(in, out);
-
-            in.close();
-            out.close();
+            Path path = zipfs.getPath(root.relativize(file).toString());
+            if (path.getParent() != null) {
+                Files.createDirectories(path.getParent());
+            }
+            Files.copy(file, path, StandardCopyOption.REPLACE_EXISTING);
 
             return 0;
         }
@@ -63,6 +58,7 @@ public class ThreadedArchiver extends Archiver {
         // setup ZipFileSystem
         Map<String, String> env = new HashMap<>();
         env.put("create", "true");
+        env.put("encoding", "UTF-8");
         URI zipURI = URI.create(String.format("jar:file:%s", this.getOutputFile()));
         zipfs = FileSystems.newFileSystem(zipURI, env);
     }
@@ -82,7 +78,8 @@ public class ThreadedArchiver extends Archiver {
         // walk input directory using our visitor class
         FileSystem fs = FileSystems.getDefault();
         try {
-            Files.walkFileTree(fs.getPath(this.getInputDir()), visitor);
+            root = fs.getPath(this.getInputDir());
+            Files.walkFileTree(root, visitor);
         } catch (IOException e) {
             e.printStackTrace();
         }
